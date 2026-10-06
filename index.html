@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Voxel Web Mini-Demo</title>
+
+  <!-- ============================================================== -->
+  <!-- ⚠️ REPLACE THESE URLs WITH YOUR ACTUAL GITHUB PAGES ADDRESS   -->
+  <!-- ============================================================== -->
+  <meta name="twitter:card" content="player">
+  <meta name="twitter:title" content="Play Mini Voxel in Feed">
+  <meta name="twitter:description" content="Click play to jump straight into a mini 3D block world.">
+  <!-- Absolute URL to any preview image for the initial thumbnail card -->
+  <meta name="twitter:image" content="https://YOUR_USERNAME.github.io/YOUR_REPO/preview.png">
+  <!-- Absolute URL to this hosted page itself (X embeds this inside an iframe) -->
+  <meta name="twitter:player" content="https://YOUR_USERNAME.github.io/YOUR_REPO/">
+  <meta name="twitter:player:width" content="480">
+  <meta name="twitter:player:height" content="480">
+
+  <!-- OpenGraph Fallback -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Play Mini Voxel in Feed">
+  <meta property="og:description" content="Click play to jump straight into a mini 3D block world.">
+  <meta property="og:image" content="https://YOUR_USERNAME.github.io/YOUR_REPO/preview.png">
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #87ceeb; font-family: sans-serif; }
+    #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+    
+    /* Crosshair */
+    #crosshair {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 14px; height: 14px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: white;
+      box-shadow: 0 0 2px rgba(0,0,0,0.8);
+    }
+    #crosshair::before { width: 14px; height: 2px; }
+    #crosshair::after { width: 2px; height: 14px; }
+
+    /* Overlay / Instructions */
+    #overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      cursor: pointer;
+      text-align: center;
+      padding: 16px;
+      z-index: 10;
+    }
+    #overlay h1 { font-size: 1.5rem; margin-bottom: 8px; }
+    #overlay p { font-size: 0.9rem; line-height: 1.5; color: #ddd; }
+    .badge {
+      display: inline-block;
+      background: #2563eb;
+      color: white;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-weight: bold;
+      margin-top: 12px;
+    }
+  </style>
+
+  <!-- Three.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+  <div id="canvas-container"></div>
+  <div id="crosshair"></div>
+
+  <div id="overlay">
+    <h1>Voxel Embed Demo</h1>
+    <p>Controls: <b>W, A, S, D</b> to move<br>
+    <b>Left Click</b>: Place block | <b>Right Click</b>: Break block<br>
+    Move mouse to look around.</p>
+    <div class="badge">Click anywhere to Play</div>
+  </div>
+
+  <script>
+    // --- 1. Scene, Camera & Renderer Setup ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb); // Sky blue
+    scene.fog = new THREE.Fog(0x87ceeb, 20, 60);
+
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 3, 6);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+    // --- 2. Lighting ---
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+    sun.position.set(20, 40, 20);
+    scene.add(sun);
+
+    // --- 3. Grid Ground / Blocks ---
+    const blockSize = 1;
+    const blockGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+    const materials = {
+      grass: new THREE.MeshLambertMaterial({ color: 0x567d46 }),
+      dirt: new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
+      wood: new THREE.MeshLambertMaterial({ color: 0xb8860b })
+    };
+
+    const interactiveObjects = [];
+
+    // Create a starter 9x9 island
+    for (let x = -4; x <= 4; x++) {
+      for (let z = -4; z <= 4; z++) {
+        const block = new THREE.Mesh(blockGeo, materials.grass);
+        block.position.set(x, 0, z);
+        scene.add(block);
+        interactiveObjects.push(block);
+      }
+    }
+
+    // --- 4. Controls & Input Handling ---
+    let isLocked = false;
+    const overlay = document.getElementById('overlay');
+
+    overlay.addEventListener('click', () => {
+      document.body.requestPointerLock();
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === document.body) {
+        isLocked = true;
+        overlay.style.display = 'none';
+      } else {
+        isLocked = false;
+        overlay.style.display = 'flex';
+      }
+    });
+
+    // Camera rotation angles
+    let pitch = 0;
+    let yaw = 0;
+    document.addEventListener('mousemove', (e) => {
+      if (!isLocked) return;
+      yaw -= e.movementX * 0.0025;
+      pitch -= e.movementY * 0.0025;
+      pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
+
+      camera.rotation.set(0, 0, 0);
+      camera.rotation.y = yaw;
+      camera.rotation.x = pitch;
+    });
+
+    // Keyboard state
+    const keys = {};
+    window.addEventListener('keydown', (e) => keys[e.code] = true);
+    window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+    // Block interaction (Raycasting)
+    const raycaster = new THREE.Raycaster();
+    const center = new THREE.Vector2(0, 0);
+
+    window.addEventListener('mousedown', (e) => {
+      if (!isLocked) return;
+      raycaster.setFromCamera(center, camera);
+      const intersects = raycaster.intersectObjects(interactiveObjects);
+
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        if (e.button === 0) {
+          // Left click: Add block adjacent to face
+          const newPos = hit.point.clone().add(hit.face.normal.clone().multiplyScalar(0.5)).round();
+          const newBlock = new THREE.Mesh(blockGeo, materials.wood);
+          newBlock.position.copy(newPos);
+          scene.add(newBlock);
+          interactiveObjects.push(newBlock);
+        } else if (e.button === 2) {
+          // Right click: Remove clicked block
+          scene.remove(hit.object);
+          const idx = interactiveObjects.indexOf(hit.object);
+          if (idx > -1) interactiveObjects.splice(idx, 1);
+        }
+      }
+    });
+
+    // Disable default right-click menu
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Window resize handling
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- 5. Main Game Loop ---
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+
+      if (isLocked) {
+        const speed = 5.0 * delta;
+        const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        const side = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+
+        if (keys['KeyW']) camera.position.addScaledVector(forward, speed);
+        if (keys['KeyS']) camera.position.addScaledVector(forward, -speed);
+        if (keys['KeyA']) camera.position.addScaledVector(side, -speed);
+        if (keys['KeyD']) camera.position.addScaledVector(side, speed);
+        if (keys['Space']) camera.position.y += speed;
+        if (keys['ShiftLeft']) camera.position.y -= speed;
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
