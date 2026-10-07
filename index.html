@@ -131,31 +131,41 @@
       }
     }
 
-    // --- 4. Controls & Input Handling ---
-    let isLocked = false;
+let isPlaying = false;
     const overlay = document.getElementById('overlay');
 
-    overlay.addEventListener('click', () => {
-      document.body.requestPointerLock();
-    });
-
-    document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement === document.body) {
-        isLocked = true;
-        overlay.style.display = 'none';
-      } else {
-        isLocked = false;
-        overlay.style.display = 'flex';
-      }
+    // Dismiss overlay immediately on click/touch (no pointer lock required)
+    overlay.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      isPlaying = true;
+      overlay.style.display = 'none';
+      window.focus(); // Ensure iframe captures WASD keyboard events
     });
 
     // Camera rotation angles
     let pitch = 0;
     let yaw = 0;
-    document.addEventListener('mousemove', (e) => {
-      if (!isLocked) return;
-      yaw -= e.movementX * 0.0025;
-      pitch -= e.movementY * 0.0025;
+    let isDragging = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    // Drag to rotate view
+    window.addEventListener('pointerdown', (e) => {
+      if (!isPlaying) return;
+      isDragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!isPlaying || !isDragging) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+
+      yaw -= dx * 0.005;
+      pitch -= dy * 0.005;
       pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
 
       camera.rotation.set(0, 0, 0);
@@ -163,41 +173,64 @@
       camera.rotation.x = pitch;
     });
 
+    window.addEventListener('pointerup', () => isDragging = false);
+    window.addEventListener('pointercancel', () => isDragging = false);
+
     // Keyboard state
     const keys = {};
-    window.addEventListener('keydown', (e) => keys[e.code] = true);
+    window.addEventListener('keydown', (e) => {
+      keys[e.code] = true;
+      // Prevent browser from scrolling the X timeline on Space/Arrow keys
+      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        e.preventDefault();
+      }
+    });
     window.addEventListener('keyup', (e) => keys[e.code] = false);
 
-    // Block interaction (Raycasting)
+    // Block interaction (Click to place/remove)
     const raycaster = new THREE.Raycaster();
     const center = new THREE.Vector2(0, 0);
 
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+   // Convert click coordinates to Three.js Normalized Device Coordinates (-1 to +1)
+    const mouse = new THREE.Vector2();
+
     window.addEventListener('mousedown', (e) => {
-      if (!isLocked) return;
-      raycaster.setFromCamera(center, camera);
+      // Ignore clicks on the intro overlay or right-clicks for camera dragging
+      if (!isPlaying || e.target === overlay) return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      // Cast the ray from your actual mouse click position
+      raycaster.setFromCamera(mouse, camera);
       const intersects = raycaster.intersectObjects(interactiveObjects);
 
       if (intersects.length > 0) {
         const hit = intersects[0];
-        if (e.button === 0) {
-          // Left click: Add block adjacent to face
-          const newPos = hit.point.clone().add(hit.face.normal.clone().multiplyScalar(0.5)).round();
+
+        if (e.button === 0 && e.shiftKey) {
+          // Shift + Left Click: Break block
+          scene.remove(hit.object);
+          const idx = interactiveObjects.indexOf(hit.object);
+          if (idx > -1) interactiveObjects.splice(idx, 1);
+        } else if (e.button === 0) {
+          // Normal Left Click: Place block adjacent to the clicked face
+          const normal = hit.face.normal.clone();
+          // Transform normal into world space in case of rotations
+          normal.transformDirection(hit.object.matrixWorld);
+
+          const newPos = hit.object.position.clone().add(normal.round());
           const newBlock = new THREE.Mesh(blockGeo, materials.wood);
           newBlock.position.copy(newPos);
           scene.add(newBlock);
           interactiveObjects.push(newBlock);
-        } else if (e.button === 2) {
-          // Right click: Remove clicked block
-          scene.remove(hit.object);
-          const idx = interactiveObjects.indexOf(hit.object);
-          if (idx > -1) interactiveObjects.splice(idx, 1);
         }
       }
     });
-
-    // Disable default right-click menu
-    window.addEventListener('contextmenu', (e) => e.preventDefault());
-
+    
     // Window resize handling
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
@@ -211,7 +244,7 @@
       requestAnimationFrame(animate);
       const delta = clock.getDelta();
 
-      if (isLocked) {
+      if (isPlaying) {
         const speed = 5.0 * delta;
         const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
         const side = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
@@ -221,7 +254,7 @@
         if (keys['KeyA']) camera.position.addScaledVector(side, -speed);
         if (keys['KeyD']) camera.position.addScaledVector(side, speed);
         if (keys['Space']) camera.position.y += speed;
-        if (keys['ShiftLeft']) camera.position.y -= speed;
+        if (keys['KeyC']) camera.position.y -= speed;
       }
 
       renderer.render(scene, camera);
