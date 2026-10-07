@@ -11,7 +11,7 @@
   <!-- Absolute URL to any preview image for the initial thumbnail card -->
   <meta name="twitter:image" content="https://usereditable.github.io/twitter_embed_demo/preview.png">
   <!-- Absolute URL to this hosted page itself (X embeds this inside an iframe) -->
-  <meta name="twitter:player" content="https://usereditable.github.io/twitter_embed_demo/">
+  <meta name="twitter:player" content="https://usereditable.github.io/twitter_embed_demo/?v=1">
   <meta name="twitter:player:width" content="480">
   <meta name="twitter:player:height" content="480">
 
@@ -230,7 +230,7 @@ let isPlaying = false;
         }
       }
     });
-    
+
     // Window resize handling
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
